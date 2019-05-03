@@ -13,6 +13,10 @@
         - [用索引筛选](#用索引筛选)
         - [类型筛选](#类型筛选)
         - [复合的from子句](#复合的from子句)
+        - [排序](#排序)
+        - [分组](#分组)
+        - [LINQ查询中的变量](#linq查询中的变量)
+        - [总结](#总结)
 
 <!-- /TOC -->
 ## LINQ概述
@@ -212,3 +216,151 @@ Print(query);
 ```
 
 ### 复合的from子句
+- 如果需要根据对象的一个成员进行筛选，而该成员本身是一个系列，就可以使用复合的from子句。如Racer的Cars是字符串数组，因此可以使用第一个from访问racers，第二个from访问cars，然后根据赛车去筛选racer。
+```
+var ferrariDrivers = from r in Formula1.GetChampions()
+                    from c in r.Cars
+                    where c == "Ferrari"
+                    orderby r.LastName
+                    select r.FirstName + " " + r.LastName;
+Print(ferrariDrivers);
+```
+
+- C#编译器把符合的from子句和LINQ查询转换为SelectMany扩展方法。SelectMany可以用于迭代序列的序列。
+
+- SelectMany方法的重载版本如下：
+```
+public static IEnumerable<TResult> SelectMany<TSource, TCollection, TResult>(
+    this IEnumerable<TSource> source,
+    Func<Tsource, IEnumerable<TCollection>> collectionSelector,
+    Func<TSource, TCollection, TResult> resultSelector);
+)
+```
+- 第一个是隐式参数。第二个参数是collectionSelector委托，其中定义了内部序列。在lambda表达式r => r.Cars中，应返回赛车集合。
+- 第三个参数是一个委托，现在为每个赛车调用该委托，接收Racer和Car对象。lambda表达式创建了一个匿名类型，它有Racer和Car属性。
+  
+- 这个SelectMany方法的结果是摊平了赛车手和赛车的层次结构，为每辆赛车返回匿名类型的一个新对象集合。
+
+```
+ var champions = Formula1.GetChampions();
+var ferrariDrivers = champions.SelectMany(r => r.Cars, (r, c) => new { Racer = r, Car = c })
+        .Where(r => r.Car == "Ferrari")
+        .OrderBy(r => r.Racer.LastName)
+        .Select(r => r.Racer.FirstName + " " + r.Racer.LastName);
+Print(ferrariDrivers);
+```
+
+- 当然还可以使用where来达到这个效果，直接判断racer的Cars里是否含有Ferrari的赛车。
+```
+var Drivers = champions.Where(r => r.Cars.Any(c => c == "Ferrari"))
+        .OrderBy(r => r.LastName)
+        .Select(r => r.FirstName + " " + r.LastName);
+```
+
+- 但是SelectMany可以改变原来的层次结构。也就是说我可以把赛车手和赛车放到同一层次输出：
+```
+var champions = Formula1.GetChampions();
+var driversAndCar = champions.SelectMany(r => r.Cars, (r, c) => new { Racer = r, Car = c })
+    .OrderBy(r => r.Car)
+    .Select(r => "Car:" + r.Car + ", racer:" + r.Racer.FirstName + " " + r.Racer.LastName);
+```
+
+### 排序
+- 要对序列排序，前面使用了orderby子句。orderby descending可以降序排序。
+
+- orderby子句解析为OrderBy方法，orderby descending 子句解析为OrderByDescending方法：
+```
+var racers = Formula1.GetChampions()
+    .Where(r => r.Country == "Brazil")
+    .OrderByDescending(r => r.Wins);
+Print(racers);
+```
+
+- OrderBy和OrderByDescending方法返回`IOrderEnumerable<TSource>`。这个接口派生自`IEnumerable<T>`接口，担保函一个额外的方法`CreateOrderedEnumerable<TSource>()`。这个方法用于进一步给序列排序。
+
+- 如果根据关键字选择器来排序，其中有两项相同，就可以使用ThenBy和ThenByDescending方法继续排序。这两个方法需要`IOrderEnumerable<TSource>`接口，但也返回该接口，所以可以无限次调用这两个方法进行排序。
+
+- 使用LINQ查询时，只需要把所有用于排序的不同关键字(用逗号分隔开)添加到orderby子句中。
+```
+var racers = (from r in Formula1.GetChampions()
+                orderby r.Country, r.LastName, r.FirstName
+                select $"{r:A}").Take(10);
+Print(racers);
+//
+Juan Manuel Fangio, Argentina; Starts: 51, wins: 24
+Jack Brabham, Australia; Starts: 125, wins: 14
+Alan Jones, Australia; Starts: 115, wins: 12
+Niki Lauda, Austria; Starts: 173, wins: 25
+Jochen Rindt, Austria; Starts: 60, wins: 6
+Emerson Fittipaldi, Brazil; Starts: 143, wins: 14
+Nelson Piquet, Brazil; Starts: 204, wins: 23
+Ayrton Senna, Brazil; Starts: 161, wins: 41
+Jacques Villeneuve, Canada; Starts: 165, wins: 11
+Mika Hakkinen, Finland; Starts: 160, wins: 20
+```
+
+### 分组
+- 要根据一个关键字值对查询结果分组，可以使用group子句。现在一级方程式冠军应按照国家分组，并列出一个国家的冠军赛车手数。
+    - 子句group r by r.Country into g根据Country属性组合所有的赛车手，并定义一个新的标识符g，它用于访问分组的结果信息。
+    - group子句的结果根据应用到分组结果上的扩展方法Count来排序，如果冠军书相同，就根据关键字来排序，该关键字是国家，这是分组所使用的关键字。
+    - where子句根据至少有2项的分组来筛选结果
+    - select子句创建一个带Country和Count属性的匿名类型
+```
+var champions = Formula1.GetChampions();
+var countries = from r in champions
+                group r by r.Country into g
+                orderby g.Count() descending, g.Key
+                where g.Count() >= 2
+                select new
+                {
+                    Country = g.Key,
+                    Count = g.Count()
+                };
+```
+
+- 要用扩张方法执行相同的操作，应把groupby子句解析为GroupBy方法。在GroupBy方法的声明中，注意它返回实现了IGrouping接口的枚举对象。
+- IGrouping接口定义了Key属性，所以在定义了对这个方法的调用后，可以访问分组的关键字。
+```
+public static IEnumerable<IGrouping<TKey, TSource>> GroupBy<Tsource, Tkey>(
+    this IEnumerable<TSource> source, Func<Tsource, TKey> keySelector);
+)
+
+- 把子句group r by r.Country into g解析为GroupBy(r=> r.Country)，返回分组序列。
+```
+```
+ var extension = champions.GroupBy(r => r.Country)
+    .OrderByDescending(g => g.Count())
+    .ThenBy(g => g.Key)
+    .Where(g => g.Count() >= 2)
+    .Select(g => new { Country = g.Key, Count = g.Count() });
+```
+
+### LINQ查询中的变量
+- 在为分组编写的LINQ查询中，Count方法调用了多次。使用let子句可以改变这种方式。let允许在LINQ查询中定义变量：
+```
+var countries = from r in champions
+                group r by r.Country into g
+                let count = g.Count()
+                orderby count descending, g.Key
+                where count >= 2
+                select new
+                {
+                    Country = g.Key,
+                    Count = count
+                };
+```
+- 使用方法语法，Count方法也调用了多次。为了定义传递给下一个方法的额外数据(let子句执行的操作)，可以使用Select方法来创建匿名类型。这里创建了一个带Group和Count属性的匿名类型。带有这些属性的一组项可以传递给OrderByDescending方法。
+```
+var extension = champions.GroupBy(r => r.Country)
+    .Select(g => new {Group = g, Count = g.Count() })
+    .OrderByDescending(g => g.Count)
+    .ThenBy(g => g.Group.Key)
+    .Where(g => g.Count >= 2)
+    .Select(g => new { Country = g.Group.Key, Count = g.Count });
+```
+
+- 应考虑根据let子句或Select方法创建的临时对象的数量。查询大列表时，创建的大量对象需要以后进行垃圾收集，这可能对性能产生巨大影响。
+
+
+### 总结
+- linq子句总是会被编译器翻译成扩展方法。
