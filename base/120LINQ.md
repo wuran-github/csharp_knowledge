@@ -19,6 +19,7 @@
         - [对嵌套的对象分组](#对嵌套的对象分组)
         - [内连接](#内连接)
         - [左外连接](#左外连接)
+        - [组连接](#组连接)
         - [总结](#总结)
 
 <!-- /TOC -->
@@ -267,6 +268,24 @@ var driversAndCar = champions.SelectMany(r => r.Cars, (r, c) => new { Racer = r,
     .OrderBy(r => r.Car)
     .Select(r => "Car:" + r.Car + ", racer:" + r.Racer.FirstName + " " + r.Racer.LastName);
 ```
+- SelectMany的摊平就是把结构里的数组拿出来，增加数组对应的条目，每个条目的结构部分用原结构填充：
+- 如下结构：
+```
+Racer{
+    Name,
+    Cars[]
+}
+有这么一条数据:
+Racer{
+    "Juan Manuel",
+     new string[] { "Alfa Romeo", "Maserati", "Mercedes", "Ferrari" }
+     }
+摊平后：
+Alfa Romeo Juan Manuel
+Maserati Juan Manuel
+Mercedes Juan Manuel
+Ferrari Juan Manuel
+```
 
 ### 排序
 - 要对序列排序，前面使用了orderby子句。orderby descending可以降序排序。
@@ -471,9 +490,192 @@ var racersAndTeams = from r in racers
     - 后面就可以去创建新的类型了，如果r有数据而team没数据，就会返回null，只需要判断t2是不是Null即可。
 
 - 扩展方法：
+
+- 首先分析linq，实际上第二步的 into是一个组连接，也就是说
+```
+from r in racers
+join t in teams on r.Year equals t.Year into rt
+```
+- 实际上是GroupJoin，我们使用GroupJoin扩展方法
+```
+racers.GroupJoin(teams, r => r.Year, t => t.Year, (r, t) => new
+{
+    Year = r.Year,
+    Champion = r.Name,
+    Constructors = t
+})
+```
+- 用ILSpy查看源码，会发现就是翻译成了一个join into的语句
+```
+from r in racers
+join t in teams on r.Year equals t.Year into t
+select new
+{
+    Year = r.Year,
+    Champion = r.Name,
+    Constructors = t
+}
+```
+- 注意我们现在的层次结构是：
+```
+Racer{//赛车手
+    Year
+    Chanpion
+    Constructors{//车队
+
+    }
+}
+```
+- 我们要做的就是把车队提到和赛车手一个层次结构
+
+- 接下来就是一个from语句，前面提到过多个from使用SelectMany方法：
+```
+.SelectMany(rt => rt.Constructors.DefaultIfEmpty(), (r, t) => new
+{
+    r.Year,
+    r.Champion,
+    Constructor = t == null ? "no constructor":t.Name,
+})
+```
+- 我们的做法实际上是Constructor摊平到和Racer一个层次结构
+- 到了这一步就已经完成了。
+
+- 下面是完整的扩展方法：
+```
+var extension = racers.GroupJoin(teams, r => r.Year, t => t.Year, (r, t) => new
+    {
+        Year = r.Year,
+        Champion = r.Name,
+        Constructors = t
+    }).SelectMany(rt => rt.Constructors.DefaultIfEmpty(), (r, t) => new
+    {
+        r.Year,
+        r.Champion,
+        Constructor = t == null ? "no constructor":t.Name,
+    }).OrderBy(t=>t.Year);
 ```
 
+### 组连接
+- 左外连接使用了组连接和into子句。它有一部分语法与组连接相同，只不过组连接不适用DefaultIfEmpty方法。
+
+- 使用组连接时，可以连接两个独立的序列，对于其中一个序列中的某个元素，另一个序列中存在对应的一个项列表。
+
+- 我们有一个冠军列表，显示了每年的前三名。现在我们希望统计每个赛车手获得前三名的的情况，分别是哪一年，获得第几名。
+- 这时候我们就可以使用组连接。
+
+- 有一个RacerInfo的类用于保存哪一年，第几名，是谁的信息。我们首先需要把冠军列表转换成RacerInfo。
+- 由于是把冠军列表的前三名抽出来，明显我们需要做的是平摊。也就是使用SelectMany 或两个from
 ```
+var racers = Formula1.GetChampionships()
+    .SelectMany(c => new List<RacerInfo>
+    {
+        new RacerInfo()
+        {
+            Year = c.Year,
+            Position = 1,
+            FirstName = c.First.FirstName(),
+            LastName = c.First.LastName()
+        },
+        new RacerInfo()
+        {
+            Year = c.Year,
+            Position = 2,
+            FirstName = c.Second.FirstName(),
+            LastName = c.Second.LastName()
+        },
+        new RacerInfo()
+        {
+            Year = c.Year,
+            Position = 3,
+            FirstName = c.Third.FirstName(),
+            LastName = c.Third.LastName()
+        },
+    });
+```
+
+- 也可以使用匿名类型来创建，创建匿名数组使用`new []`关键字。
+```
+var racer2 = from c in Formula1.GetChampionships()
+            from r in new[]
+            {
+            new
+            {
+                Year = c.Year,
+                Position = 1,
+                FirstName = c.First.FirstName(),
+                LastName = c.First.LastName()
+            },
+            new
+            {
+                Year = c.Year,
+                Position = 2,
+                FirstName = c.Second.FirstName(),
+                LastName = c.Second.LastName()
+            },
+            new
+            {
+                Year = c.Year,
+                Position = 3,
+                FirstName = c.Third.FirstName(),
+                LastName = c.Third.LastName()
+            },
+            }
+            select r;
+```
+- 接下来就是组连接，组连接使用into，代表把join的数组放到一个集合中去。
+```
+var query = from r in Formula1.GetChampions()
+            join r2 in racers on new
+            {
+                FirstName = r.FirstName,
+                LastName = r.LastName
+            }
+            equals
+            new
+            {
+                FirstName = r2.FirstName,
+                LastName = r2.LastName
+            }
+            into yearResults
+            select new
+            {
+                FirstName = r.FirstName,
+                LastName = r.LastName,
+                Wins = r.Wins,
+                Starts = r.Starts,
+                Results = yearResults
+            };
+```
+
+- 最后是输出结果：
+
+```
+Nino Farina
+1950, 1
+1952, 2
+1953, 3
+Alberto Ascari
+1951, 2
+1952, 1
+1953, 1
+```
+
+- 组连接的扩展方法是GroupJoin:
+```
+var query2 = Formula1.GetChampions()
+    .GroupJoin(racer2, r => new { r.FirstName, r.LastName },
+    r2 => new { r2.FirstName, r2.LastName }, (r1, r2) => new
+    {
+        r1.FirstName,
+        r1.LastName,
+        r1.Wins,
+        r1.Starts,
+        Results = r2
+    });
+```
+
+
 ### 总结
 - linq子句总是会被编译器翻译成扩展方法。
+- selectMany方法可以把结构里的属性摊平到上一层
 - groupby语句分出来的group里包含着组成对应组的所有行信息。
