@@ -16,6 +16,9 @@
         - [排序](#排序)
         - [分组](#分组)
         - [LINQ查询中的变量](#linq查询中的变量)
+        - [对嵌套的对象分组](#对嵌套的对象分组)
+        - [内连接](#内连接)
+        - [左外连接](#左外连接)
         - [总结](#总结)
 
 <!-- /TOC -->
@@ -361,6 +364,116 @@ var extension = champions.GroupBy(r => r.Country)
 
 - 应考虑根据let子句或Select方法创建的临时对象的数量。查询大列表时，创建的大量对象需要以后进行垃圾收集，这可能对性能产生巨大影响。
 
+### 对嵌套的对象分组
+- 如果分组的对象应包含嵌套的序列，就可以改变select子句创建的匿名类型。
 
+- 在下面的例子中，所返回的国家不仅应包含郭家铭和赛车手数量两个属性，还应包含赛车手的名序列。这个序列用一个赋予Racers属性的from/in内部子句指定，内部的from子句使用分组标识符g获得该分组中的所有赛车手，用姓氏对他们排序，再根据姓名创建一个新字符串。
+```
+var champions = Formula1.GetChampions();
+var countries = from r in champions
+                group r by r.Country into g
+                let count = g.Count()
+                orderby count descending, g.Key
+                where count >= 2
+                select new
+                {
+                    Country = g.Key,
+                    Count = count,
+                    
+                    Racers = from r1 in g
+                                orderby r1.LastName
+                                select r1.FirstName + " " + r1.LastName
+                };
+```
+- 使用扩展方法对应的方法如下：
+```
+var extension = champions.GroupBy(r => r.Country)
+    .Select(g => new { Group = g, Count = g.Count() })
+    .OrderByDescending(g => g.Count)
+    .ThenBy(g => g.Group.Key)
+    .Where(g => g.Count >= 2)
+    .Select(g => new
+    {
+        Country = g.Group.Key,
+        Count = g.Count,
+        Racers = g.Group.OrderBy(r => r.LastName)
+        .Select(r => r.FirstName + " " + r.LastName)
+    });
+```
+
+### 内连接
+- 使用join子句可以根据特定的条件合并两个数据源，但之前要获得两个要连接的列表。下面是连接赛车手冠军和车队冠军，列出每年的赛车手冠军和车队冠军。
+  
+- 首先要含有年份的车队和赛车手的两个查询，然后使用join语句连接它们。
+- join的语法是，先是第一个表的常规from，然后是join代替from，连接第二个表。on代表连接条件
+```
+var query = from t1 in table1
+            join t2 in table2 on t1.condition equals t2.condition
+            ... 
+```
+```
+var racers = from r in Formula1.GetChampions()
+                from y in r.Years
+                select new
+                {
+                    Year = y,
+                    Name = r.FirstName + " " + r.LastName
+                };
+var teams = from t in Formula1.GetConstructorChampions()
+            from y in t.Years
+            select new
+            {
+                Year = y,
+                Name = t.Name
+            };
+var racersAndTeams = from r in racers
+                        join t in teams on r.Year equals t.Year
+                        select new
+                        {
+                            r.Year,
+                            Champion = r.Name,
+                            Constructor = t.Name
+                        };
+```
+- 也可以合并成一个LINQ查询。
+
+- 扩展方法使用Join，隐式参数是第一个表，第一个参数是第二个表，第二个参数和第三个参数是要匹配的条件，第四个参数是创建的新类型。
+```
+var extension = racers.Join(teams, r => r.Year, t => t.Year,
+    (r, t) => new {
+        r.Year,
+        Champion = r.Name,
+        Constructor = t.Name
+    });
+```
+
+### 左外连接
+- 内连接是根据连接条件，当两个数据源都有数据是才会产生连接数据。有时候我们需要把所有的数据都列出来。
+
+- 这时候使用左外连接。如上述的我们需要包含所有的年份，而1958年开始才有车队冠军。
+
+- 左外连接用Join和DefaultIfEmpty方法定义。
+```
+var racersAndTeams = from r in racers
+                    join t in teams on r.Year equals t.Year into rt
+                    from t2 in rt.DefaultIfEmpty() //t2会代替掉t
+                    orderby r.Year
+                    select new
+                    {
+                        Year = r.Year,
+                        Champion = r.Name,
+                        Constructor = t2 == null ? "no constructor" : t2.Name
+                    };
+```
+- 解释过程：
+    - 首先在join之后加了一个into关键字，代表把t的数据全部into到rt中，这样t的作用域就结束了
+    - 后面使用from 从rt中查询，rt.DefaultIfEmpty是指如果rt中没数据就返回Default数据，这时候rt的作用域也结束了
+    - 后面就可以去创建新的类型了，如果r有数据而team没数据，就会返回null，只需要判断t2是不是Null即可。
+
+- 扩展方法：
+```
+
+```
 ### 总结
 - linq子句总是会被编译器翻译成扩展方法。
+- groupby语句分出来的group里包含着组成对应组的所有行信息。
