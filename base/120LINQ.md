@@ -20,6 +20,10 @@
         - [内连接](#内连接)
         - [左外连接](#左外连接)
         - [组连接](#组连接)
+        - [集合操作](#集合操作)
+        - [合并](#合并)
+        - [分区](#分区)
+        - [聚合操作符](#聚合操作符)
         - [总结](#总结)
 
 <!-- /TOC -->
@@ -674,8 +678,94 @@ var query2 = Formula1.GetChampions()
     });
 ```
 
+### 集合操作
+- 扩展方法Distinct Union Intersect和Except都是集合操作。
+    - Distinct是去重
+    - Union是求并集
+    - Intersect是求交集
+    - Except是求差集
+
+- 下面用Intersect作为例子，求驾驶法拉利和迈凯伦的所有冠军
+
+- 首先我们查出驾驶两种赛车的所有冠军，由于两个查询除了参数外基本一致，而且不在其他地方使用，所以可以定义一个委托来使用。
+```
+Func<string, IEnumerable<Racer>> getDrivers = (car) =>
+{
+    return Formula1.GetChampions().Where(r => r.Cars.Contains(car));
+};
+```
+- 然后传递参数求两个集合，最后使用Intersect求交集。只有一个人
+```
+var ferrariDrivers = getDrivers("Ferrari");
+var mcLarenDrivers = getDrivers("McLaren");
+var bothDrivers = ferrariDrivers.Intersect(mcLarenDrivers);
+foreach (var item in bothDrivers)
+{
+    Debug.WriteLine(item);
+}
+//
+Niki Lauda
+```
+
+- 集合操作通过调用实体类的GetHashCode和Equals方法来比较对象。对于自定义比较，还可以传递一个实现了IEqualityComparer接口的对象。
+
+### 合并
+- Zip方法允许用一个谓词函数把两个相关的序列合并为一个。
+
+- 查看源码，发现Zip调用的是ZipIterator，他是把两个集合按顺序遍历，不进行任何比较。
+```
+using (IEnumerator<TFirst> e3 = first.GetEnumerator())
+{
+    using (IEnumerator<TSecond> e2 = second.GetEnumerator())
+    {
+        while (e3.MoveNext() && e2.MoveNext())
+        {
+            yield return resultSelector(e3.Current, e2.Current);
+        }
+    }
+}
+```
+- 也就是Zip不会去管两个集合里面是什么，就是强行合并就完事了。
+
+- 如果两个序列的项数不同，Zip方法就在到达较小集合的末尾时停止。
+```
+var champions = Formula1.GetChampions();
+var racers = champions.Where(r => r.Country == "Italy");
+var racerNames = racers.Select(r => new { Name = r.FirstName + " " + r.LastName });
+var racerStarts = racers.Select(r => new { r.Starts });
+var zips = racerNames.Zip(racerStarts,
+    (first, second) => first.Name + ", starts: " + second.Starts);
+foreach (var r in zips)
+{
+    Debug.WriteLine(r);
+}
+```
+
+### 分区
+- 扩展方法Take和Skip等的分区操作可用于分页。Skip是跳过项，Take是获取项。
+```
+var champions = Formula1.GetChampions();
+var page1 = champions.Skip(5).Take(5);
+var page2 = champions.SkipWhile(r => r.Wins < 5);
+var page3 = champions.TakeWhile(r => r.Wins > 10);
+```
+
+- TakeWhile和SkipWhile可以传入一个谓词，根据谓词结果提取或跳过这些项。
+
+### 聚合操作符
+- 聚合操作符如(Count Sum Min Max Average Aggregate)不返回一个序列，而返回一个值。
+    - Count返回集合的项数。
+    - Sum汇总序列中的所有数字，返回和。
+    - Average求平均值
+
+- Aggregate有多个重载，可以传递一个累加器函数对值进行聚合。下面是一个例子，计算所有冠军的wins次数。
+```
+var aggregate = champions.Aggregate(0, (i, r) => { return i + r.Wins; }, i => i);
+
+```
+
 
 ### 总结
-- linq子句总是会被编译器翻译成扩展方法。
+- linq子句会被编译器翻译成扩展方法。
 - selectMany方法可以把结构里的属性摊平到上一层
 - groupby语句分出来的group里包含着组成对应组的所有行信息。
