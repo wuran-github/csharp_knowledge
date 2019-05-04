@@ -24,6 +24,9 @@
         - [合并](#合并)
         - [分区](#分区)
         - [聚合操作符](#聚合操作符)
+        - [转换操作符](#转换操作符)
+        - [生成操作符](#生成操作符)
+    - [并行LINQ](#并行linq)
         - [总结](#总结)
 
 <!-- /TOC -->
@@ -763,7 +766,46 @@ var page3 = champions.TakeWhile(r => r.Wins > 10);
 var aggregate = champions.Aggregate(0, (i, r) => { return i + r.Wins; }, i => i);
 
 ```
+### 转换操作符
+- 前面提到，查询可以推迟到访问数据项时在执行。在迭代中使用查询时，查询会执行。而使用转换操作符会立即执行查询，把查询结果放在数组、列表或字典中。
+- 把返回的对象放在列表中并没有这么简单。例如，对于集合类从赛车到赛车手的快速访问，可以使用新类`Lookup<Tkey,TElement>`。
+    - Lookup支持一个键对应多个值。Dictionary支持一个键对应一个值。(当然也可以把这个值换成一个List)
 
+- 下面可以把冠军列表转换为以国家为Key的Lookup类型。并且打印出英国的冠军。
+```
+ILookup<string,Racer> lookup = champions.ToLookup(r => r.Country);
+Print(lookup["UK"]);
+//
+Mike Hawthorn
+John Surtees
+Jim Clark
+Graham Hill
+Jackie Stewart
+James Hunt
+Nigel Mansell
+Damon Hill
+Lewis Hamilton
+Jenson Button
+```
+- 如果需要在非类型化的集合上(如ArrayList)使用LINQ查询，可以使用Cast方法。Cast方法把集合的元素强制转换为目标类型。
+```
+var list = new ArrayList(champions as ICollection);
+var list2 = list.Cast<Racer>();
+```
+
+### 生成操作符
+- 生成操作符Range Empty和Repeat不是扩展方法，而是返回序列的正常静态方法。
+- Range方法生成一个指定范围的`IEnumerable<int>`集合。
+- Empty()返回一个不返回值的迭代器。
+- Repeat方法返回一个迭代器，该迭代器把同一个值重复特定的次数。
+```
+var ints = Enumerable.Range(1, 10);
+var empty = Enumerable.Empty<Racer>();
+var strs = Enumerable.Repeat<string>("test", 10);
+```
+
+---
+## 并行LINQ
 
 ### 总结
 - linq子句会被编译器翻译成扩展方法。
