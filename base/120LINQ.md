@@ -26,8 +26,9 @@
         - [聚合操作符](#聚合操作符)
         - [转换操作符](#转换操作符)
         - [生成操作符](#生成操作符)
-    - [并行LINQ](#并行linq)
         - [总结](#总结)
+    - [并行LINQ](#并行linq)
+        - [并行查询](#并行查询)
 
 <!-- /TOC -->
 ## LINQ概述
@@ -804,10 +805,16 @@ var empty = Enumerable.Empty<Racer>();
 var strs = Enumerable.Repeat<string>("test", 10);
 ```
 
----
-## 并行LINQ
 
 ### 总结
 - linq子句会被编译器翻译成扩展方法。
 - selectMany方法可以把结构里的属性摊平到上一层
 - groupby语句分出来的group里包含着组成对应组的所有行信息。
+
+
+---
+## 并行LINQ
+- System.Linq中包含的类ParallelEnumerable可以粉节查询的工作，使其分布在多个线程上。尽管Enumerable类给`IEnumerable<T>`接口定义了扩展方法，但ParallelEnumerable类的大多数扩展方法是`ParallelQuery<TSource>`类的扩展。一个重要的异常是AsParallel方法，他扩展了`IEnumerable<T>`接口，返回`ParallelQuery<TSource>`类，所以正常的集合类可以以并行方式查询。
+
+### 并行查询
+- 为了说明并行LINQ(Parallel LINQ, PLINQ)，需要一个大型集合。对于可以放在CPU缓存中的小鸡和，并行LINQ看不出效果。在下面的代码中，用随机值填充一个大型的int集合。
