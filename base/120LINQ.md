@@ -29,6 +29,8 @@
         - [总结](#总结)
     - [并行LINQ](#并行linq)
         - [并行查询](#并行查询)
+        - [分区器](#分区器)
+        - [取消](#取消)
 
 <!-- /TOC -->
 ## LINQ概述
@@ -817,4 +819,83 @@ var strs = Enumerable.Repeat<string>("test", 10);
 - System.Linq中包含的类ParallelEnumerable可以粉节查询的工作，使其分布在多个线程上。尽管Enumerable类给`IEnumerable<T>`接口定义了扩展方法，但ParallelEnumerable类的大多数扩展方法是`ParallelQuery<TSource>`类的扩展。一个重要的异常是AsParallel方法，他扩展了`IEnumerable<T>`接口，返回`ParallelQuery<TSource>`类，所以正常的集合类可以以并行方式查询。
 
 ### 并行查询
-- 为了说明并行LINQ(Parallel LINQ, PLINQ)，需要一个大型集合。对于可以放在CPU缓存中的小鸡和，并行LINQ看不出效果。在下面的代码中，用随机值填充一个大型的int集合。
+- 为了说明并行LINQ(Parallel LINQ, PLINQ)，需要一个大型集合。对于可以放在CPU缓存中的小集合，并行LINQ看不出效果。在下面的代码中，用随机值填充一个大型的int集合。
+```
+public static IEnumerable<int> SampleData()
+{
+    const int arraySize = 50000000;
+    var r = new Random();
+    return Enumerable.Range(0, arraySize).Select(x => r.Next(140)).ToList();
+}
+```
+
+- 我们使用AsParallel方法就会启动并行处理。AsParallel方法用ParallelEnumerable类定义，以扩展IEnumerable接口，所以可以对简单的数组调用它。
+- AsParallel方法返回`ParallelQuery`。因为返回的类型，所以编译器选择的Where方法是ParallelEnumerable.Where，而不是Enumerable.Where。因此，后面的Average方法也来自ParallelEnumerable类。
+
+- ParallelEnumerable类的查询是分区的，以便多个线程可以同时处理该查询。集合可以分为多个部分，其中每个部分由不同的线程处理，以筛选其余项。完成分区的工作后，就需要合并，获得所有部分的综合。
+```
+var res = data.AsParallel().Where(x => Math.Log(x) < 4)
+    .Average();
+Debug.WriteLine(res);
+```
+
+- 运行后查看任务管理器，可以看到所有CPU都在忙碌。
+
+### 分区器
+- AsParallel方法不仅扩展了IEnumerable接口，还扩展了Partitoner类。通过它，可以影响要创建的分区。
+
+- Partitioner类用System.Collection.Concurrent定义，并且有不同的变体。
+
+- Create方法接受实现了IList类的数组或对象。根据这一点，以及Boolean类型的参数loadBalance和该方法的一些重载版本，会返回一个不同的Partitioner类型。
+- 对于数组，使用派生自抽象基类`OrderablePartitioner<T>`的DynamicPartitionerForArray类和StaticPartitionerForArray类。
+
+- 也可以调用WithExecutionMode和WithDegreeOfParallelism方法，来影响并行机制。这两个方法是ParallelQuery的扩展方法。
+    - WithExecutionMode可以传递ParallelExecutionMode的一个Default值或者ForceParallelism值。默认情况下，并行LINQ避免使用系统开销很高的并行机制。
+    - WithDegreeOfParallelism方法可以传递一个整数值，以指定应并行运行的最大任务数。查询不应使用全部CPU，这个方法会很有用。
+
+
+- 下面的代码手工创建一个分区器。
+```
+var res = Partitioner.Create(data, true)
+    .AsParallel().WithDegreeOfParallelism(2)
+    .WithExecutionMode(ParallelExecutionMode.Default)
+    .Where(x => Math.Log(x) < 4)
+    .Average();
+Debug.WriteLine(res);
+```
+
+### 取消
+- .NET提供了一种标准方式，来取消长时间运行的任务，这也适用于并行LINQ。
+
+- 要取消长时间运行的查询，可以给查询添加WithCancellation方法，并传递一个CancellationToken令牌作为参数。CancellationToken令牌从CancellationTokenSource类中创建。
+
+- 该查询在单独的线程中运行，在该线程中，捕获一个OperationCanceledException类型的异常。如果取消了查询，就触发这个异常。
+ 
+- 在主线程中，调用CancellationTokenSource类的Cancel方法可以取消任务。
+
+```
+public static void CancelTest()
+{
+    var cts = new CancellationTokenSource();
+    var task = Task.Run(() =>
+    {
+        try
+        {
+            var res = Partitioner.Create(data, true)
+            .AsParallel().WithCancellation(cts.Token)
+            .WithDegreeOfParallelism(2)
+            .WithExecutionMode(ParallelExecutionMode.Default)
+            .Where(x => Math.Log(x) < 4)
+            .Average();
+            Debug.WriteLine(res);
+        }
+        catch(OperationCanceledException ex)
+        {
+            Debug.WriteLine(ex.Message);
+        }
+    });
+    Thread.Sleep(500);
+    cts.Cancel();
+    Task.WaitAll(task);
+}
+```
