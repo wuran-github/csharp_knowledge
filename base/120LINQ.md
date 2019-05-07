@@ -31,6 +31,7 @@
         - [并行查询](#并行查询)
         - [分区器](#分区器)
         - [取消](#取消)
+    - [LINQ提供程序](#linq提供程序)
 
 <!-- /TOC -->
 ## LINQ概述
@@ -898,4 +899,20 @@ public static void CancelTest()
     cts.Cancel();
     Task.WaitAll(task);
 }
+```
+
+---
+## LINQ提供程序
+- `.NET` 包含几个LINQ提供程序。LINQ提供程序为特定的数据源实现了标准的查询操作符。LINQ提供程序也许会实现比LINQ定义的更多扩展方法，但至少要实现标准操作符。
+
+- LINQ to XML实现了一些专门用于XML的方法，例如，System.XML.Linq中的Extensions定义的Elements Descendants Ancestors方法。
+
+- 每个提供程序的参数不一样，LINQ提供程序的实现方案是根据名称空间和第一个参数的类型来选择的。
+- LINQ to Objects和LINQ to Entities定义的Where的方法参数就不同。
+```
+//LINQ to Objects
+public staitc IEnumerable<TSource> Where<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
+//LINQ to Entities
+public staitc IQueryable<TSource> Where<TSource>(this IQueryable<TSource> source, Expression<Func<TSource, bool>> predicate);
+
 ```
